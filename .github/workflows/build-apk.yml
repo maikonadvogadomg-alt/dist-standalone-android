@@ -1,14 +1,12 @@
 name: Build Android APK
-
 on:
-  push:
-    branches: [ main, master ]
   workflow_dispatch:
+  push:
+    branches: [main, master]
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -18,53 +16,44 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
-        with:
-          gradle-version: '8.6'
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android SDK platform 34
-        run: |
-          yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          sdkmanager --install "platforms;android-34" "build-tools;34.0.0" "platform-tools"
-          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
-          echo "$ANDROID_HOME/platform-tools" >> $GITHUB_PATH
+          cache: 'gradle'
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Install Capacitor
-        run: npm install --prefer-offline
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
 
-      - name: Copy web assets to Android
+      - name: SDK licenses + build tools
+        run: |
+          yes | sdkmanager --licenses || true
+          sdkmanager "build-tools;34.0.0" "platforms;android-34" || true
+
+      - name: Exportar JAVA_HOME/ANDROID_HOME
+        run: |
+          JAVA17="${JAVA_HOME_17_X64:-$JAVA_HOME}"
+          echo "JAVA_HOME=$JAVA17"              >> $GITHUB_ENV
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+          echo "$JAVA17/bin"                    >> $GITHUB_PATH
+
+      - name: Instalar dependências
+        run: npm install
+
+      - name: Copiar assets web para Android
         run: npx cap copy android
 
-      - name: Regenerar Gradle wrapper
+      - name: Build APK debug
         working-directory: android
         run: |
-          gradle wrapper --gradle-version 8.6 --distribution-type bin
-          chmod +x gradlew
-
-      - name: Build Debug APK
-        working-directory: android
-        timeout-minutes: 30
-        env:
-          GRADLE_OPTS: "-Xmx3g -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8"
-          JAVA_TOOL_OPTIONS: "-Xmx3g"
-        run: ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tail -150
-
-      - name: Localizar APK gerado
-        run: find android -name "*.apk" | head -5
+          chmod +x ./gradlew
+          ./gradlew assembleDebug --no-daemon -Dorg.gradle.jvmargs=-Xmx2g 2>&1
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: dist-standalone-debug-apk
+          name: app-debug
           path: android/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 30
+          if-no-files-found: error
